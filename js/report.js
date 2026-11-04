@@ -1,8 +1,8 @@
 // QR share links and the A4 PDF report (DOM blocks → paginated pages → html2canvas → jsPDF).
 
 import {
-  esc, num, estimatedTotal, pickLabel, normalize,
-  TEAM_FIELDS, ROBOT_FIELDS, MECH_FIELDS, EFF_FIELDS, RATING_FIELDS, STRATEGY_TEXT,
+  esc, num, estimatedTotal, pickLabel, normalize, matchSummary,
+  TEAM_FIELDS, ROBOT_FIELDS, MECH_FIELDS, EFF_FIELDS, RATING_FIELDS, STRATEGY_TEXT, ENDGAME_RESULTS,
 } from './model.js';
 import { fmt, fmtRank, fmtRecord, breakdownLabel, statboticsUrl } from './statbotics.js';
 
@@ -38,8 +38,8 @@ export function shareBase() {
 }
 
 export function buildShareUrl(rec) {
-  const { team, robot, mechanisms, params, efficiency, strategy } = rec;
-  let data = prune({ v: 1, team, robot, mechanisms, params, efficiency, strategy }) || {};
+  const { team, robot, mechanisms, params, efficiency, strategy, matches } = rec;
+  let data = prune({ v: 1, team, robot, mechanisms, params, efficiency, strategy, matches }) || {};
   const make = (d) => `${shareBase()}#d=${LZString.compressToEncodedURIComponent(JSON.stringify(d))}`;
   let url = make(data);
   let truncated = false;
@@ -84,7 +84,7 @@ const PAGE_H = 1123;
 const has = (v) => v !== '' && v != null && !(Array.isArray(v) && !v.length);
 const multiline = (s) => esc(s).replace(/\n/g, '<br>');
 
-function block(html, cls = '') {
+export function block(html, cls = '') {
   const el = document.createElement('div');
   el.className = `rpt-block ${cls}`;
   el.innerHTML = html;
@@ -205,6 +205,32 @@ function efficiencyBlock(rec) {
     ${ratings.length ? `<div class="rpt-ratings">${ratings.map(([k, l]) => `<div><span>${esc(l)}</span>${ratingBar(e[k])}</div>`).join('')}</div>` : ''}`)];
 }
 
+const endgameLabel = (v) => ENDGAME_RESULTS.find(([k]) => k === v)?.[1] || '—';
+const yes = (v) => (v ? '✓' : '');
+
+function matchBlocks(rec, scoring) {
+  const s = matchSummary(rec.matches, scoring);
+  if (!s) return [];
+  const pct = (v) => (v == null ? '—' : `${fmt(v, 0)}%`);
+  const tiles = [
+    ['場數', s.n], ['平均自動得分數', fmt(s.autoScored)], ['平均手動得分數', fmt(s.teleScored)],
+    ['命中率', pct(s.accuracy)], ['終局成功率', pct(s.endgameRate)], ['故障場數', s.failures],
+  ];
+  const rows = rec.matches.map((m) => `<tr>
+    <td>${esc(m.match) || '—'}</td><td>${m.alliance === 'red' ? '紅' : m.alliance === 'blue' ? '藍' : '—'}</td>
+    <td>${yes(m.leave)}</td><td>${m.autoScored} / ${m.autoMissed}</td><td>${m.teleScored} / ${m.teleMissed}</td>
+    <td>${endgameLabel(m.endgame)}</td><td>${yes(m.defense)}</td><td>${m.fouls || ''}</td><td>${yes(m.broke)}</td>
+    <td>${esc(m.notes)}</td></tr>`);
+  const head = '<thead><tr><th>場次</th><th>聯盟</th><th>離開</th><th>自動 中/失</th><th>手動 中/失</th><th>終局</th><th>防守</th><th>犯規</th><th>故障</th><th>備註</th></tr></thead>';
+  const out = [block(`
+    <h2>逐場紀錄</h2>
+    <div class="rpt-tiles">${tiles.map(([l, v]) => `<div><span>${l}</span><b>${esc(v)}</b></div>`).join('')}</div>`)];
+  for (let i = 0; i < rows.length; i += 15) {
+    out.push(block(`<table class="rpt-table">${head}<tbody>${rows.slice(i, i + 15).join('')}</tbody></table>`, 'rpt-tight'));
+  }
+  return out;
+}
+
 function strategyBlocks(rec) {
   const s = rec.strategy;
   const chips = [
@@ -278,26 +304,14 @@ function paginate(root, blocks, footText) {
   return pages;
 }
 
-export async function generatePdf(rec, onProgress = () => {}) {
+// Lays out blocks onto A4 pages, rasterises each page and saves the PDF.
+export async function renderPdf(blocks, { foot, filename, title, linkUrl, onProgress = () => {} }) {
   const root = document.getElementById('reportRoot');
   root.innerHTML = '';
   root.classList.add('active');
   try {
-    const { url } = buildShareUrl(rec);
-    const qr = qrDataUrl(url, 600);
-    const blocks = [
-      headerBlock(rec, qr),
-      ...statBlocks(rec),
-      ...robotBlocks(rec),
-      ...efficiencyBlock(rec),
-      ...strategyBlocks(rec),
-      ...photoBlocks(rec),
-    ];
     await prepareImages(blocks);
     await document.fonts?.ready;
-
-    const t = rec.team;
-    const foot = `Team ${t.number || '?'} ${t.name || ''} · ${t.event || ''} · Scout: ${t.scout || '—'} · 產生於 ${new Date().toLocaleString('zh-TW')}`;
     const pages = paginate(root, blocks, foot);
 
     const { jsPDF } = window.jspdf;
@@ -309,20 +323,41 @@ export async function generatePdf(rec, onProgress = () => {}) {
       if (i > 0) pdf.addPage();
       pdf.addImage(canvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
 
-      // Make the QR code (and its area) a clickable link in the PDF too.
-      const qrImg = pages[i].querySelector('.rpt-qr img');
+      // Make the QR code a clickable link in the PDF too.
+      const qrImg = linkUrl && pages[i].querySelector('.rpt-qr img');
       if (qrImg) {
         const pr = pages[i].getBoundingClientRect();
         const r = qrImg.getBoundingClientRect();
-        pdf.link((r.left - pr.left) * mmPerPx, (r.top - pr.top) * mmPerPx, r.width * mmPerPx, r.height * mmPerPx, { url });
+        pdf.link((r.left - pr.left) * mmPerPx, (r.top - pr.top) * mmPerPx, r.width * mmPerPx, r.height * mmPerPx, { url: linkUrl });
       }
     }
-    pdf.setProperties({ title: `Team ${t.number} Scouting Report`, subject: 'FRC Scouting', creator: 'FRC Scouting' });
-    const name = ['Team' + (t.number || 'unknown'), t.event, 'scouting'].filter(Boolean).join('_').replace(/[^\w.-]+/g, '-');
-    pdf.save(`${name}.pdf`);
+    pdf.setProperties({ title, subject: 'FRC Scouting', creator: 'FRC Scouting' });
+    pdf.save(`${filename.replace(/[^\w.-]+/g, '-')}.pdf`);
     return pages.length;
   } finally {
     root.innerHTML = '';
     root.classList.remove('active');
   }
+}
+
+export async function generatePdf(rec, { scoring, onProgress } = {}) {
+  const { url } = buildShareUrl(rec);
+  const qr = qrDataUrl(url, 600);
+  const blocks = [
+    headerBlock(rec, qr),
+    ...statBlocks(rec),
+    ...robotBlocks(rec),
+    ...matchBlocks(rec, scoring),
+    ...efficiencyBlock(rec),
+    ...strategyBlocks(rec),
+    ...photoBlocks(rec),
+  ];
+  const t = rec.team;
+  return renderPdf(blocks, {
+    foot: `Team ${t.number || '?'} ${t.name || ''} · ${t.event || ''} · Scout: ${t.scout || '—'} · 產生於 ${new Date().toLocaleString('zh-TW')}`,
+    filename: ['Team' + (t.number || 'unknown'), t.event, 'scouting'].filter(Boolean).join('_'),
+    title: `Team ${t.number} Scouting Report`,
+    linkUrl: url,
+    onProgress,
+  });
 }

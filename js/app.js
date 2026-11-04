@@ -2,16 +2,24 @@ import {
   TEAM_FIELDS, ROBOT_FIELDS, MECH_FIELDS, EFF_FIELDS, RATING_FIELDS, STRATEGY_TEXT,
   ROLE_OPTIONS, START_OPTIONS, PICK_OPTIONS,
   blankRecord, blankMech, blankParam, normalize, getPath, setPath, esc, newId,
-  recordLabel, estimatedTotal,
+  recordLabel, estimatedTotal, blankMatch, matchSummary, efficiencyFromMatches, mergeRecords,
+  SCORING_FIELDS, ENDGAME_RESULTS,
 } from './model.js';
 import { store, prefs } from './storage.js';
 import { fetchStatbotics, fmt, fmtRank, fmtRecord, breakdownLabel, statboticsUrl } from './statbotics.js';
 import { buildShareUrl, readShareHash, qrDataUrl, generatePdf } from './report.js';
+import { openMatchDialog } from './matches.js';
+import { initPickList, showPickList } from './picklist.js';
 
 const $ = (sel) => document.querySelector(sel);
 const form = $('#form');
 let state = blankRecord();
 let records = [];
+
+function loadScoring() {
+  try { return JSON.parse(prefs.get('scoring')) || {}; } catch { return {}; }
+}
+let scoring = loadScoring();
 
 /* ---------- Toast & busy overlay ---------- */
 
@@ -63,6 +71,7 @@ function renderStaticFields() {
     choiceHtml('strategy.roles', '角色定位（可複選）', ROLE_OPTIONS.map((r) => [r, r]), 'checkbox') +
     choiceHtml('strategy.startPos', '偏好起始位置', START_OPTIONS.map((r) => [r, r]), 'radio') +
     choiceHtml('strategy.pick', '選隊建議', PICK_OPTIONS, 'radio');
+  $('#scoringFields').innerHTML = SCORING_FIELDS.map(([k, l]) => `<label class="field"><span>${l}（分）</span><input data-scoring="${k}" type="number" inputmode="decimal" step="any" value="${esc(scoring[k] ?? '')}"></label>`).join('');
   $('#stratFields').innerHTML = STRATEGY_TEXT.map(([k, l, ph]) => fieldHtml(`strategy.${k}`, l, 'textarea', ph)).join('');
 }
 
@@ -81,6 +90,7 @@ function fillForm() {
   $('#statYear').value = state.statbotics?.year || state.team.year || new Date().getFullYear();
   renderLists();
   renderPhotos();
+  renderMatches();
   renderStat();
   renderEffSummary();
   renderQr();
@@ -151,6 +161,52 @@ function renderStat() {
     </table></div>` : ''}
     ${s?.gameBreakdown?.length ? `<details><summary>本季項目 EPA 細項（${s.gameBreakdown.length}）</summary>
       <div class="kv">${s.gameBreakdown.map(([k, v]) => `<div><span>${esc(breakdownLabel(k))}</span><b>${fmt(v, 2)}</b></div>`).join('')}</div></details>` : ''}`;
+}
+
+const pct = (v) => (v == null ? '—' : `${fmt(v, 0)}%`);
+const endgameLabel = (v) => ENDGAME_RESULTS.find(([k]) => k === v)?.[1] || '—';
+
+function renderMatches() {
+  const s = matchSummary(state.matches, scoring);
+  $('#matchSummary').innerHTML = s
+    ? [['場數', s.n], ['平均自動得分數', fmt(s.autoScored)], ['平均手動得分數', fmt(s.teleScored)],
+       ['命中率', pct(s.accuracy)], ['終局成功率', pct(s.endgameRate)], ['故障場數', s.failures]]
+        .map(([l, v]) => `<div class="tile"><span>${l}</span><b>${v}</b></div>`).join('')
+    : '';
+  $('#matchList').innerHTML = state.matches.length ? `<table class="matches">
+    <thead><tr><th>場次</th><th>自動 中/失</th><th>手動 中/失</th><th>終局</th><th>標記</th><th></th></tr></thead>
+    <tbody>${state.matches.map((m) => `<tr>
+      <td><span class="dot dot-${m.alliance || 'none'}"></span>${esc(m.match) || '—'}</td>
+      <td>${m.autoScored} / ${m.autoMissed}${m.leave ? ' <small class="muted">離開</small>' : ''}</td>
+      <td>${m.teleScored} / ${m.teleMissed}</td>
+      <td>${endgameLabel(m.endgame)}</td>
+      <td class="muted">${[m.defense && '防守', m.defended && '被防守', m.fouls && `犯規 ${m.fouls}`, m.broke && '故障'].filter(Boolean).join('、')}</td>
+      <td><button type="button" class="icon" data-match-edit="${m.id}">編輯</button></td></tr>`).join('')}</tbody></table>`
+    : '<p class="empty">比賽中按「新增場次」，用大按鈕快速記錄每一場。</p>';
+}
+
+function editMatch(match, isNew) {
+  openMatchDialog(match, isNew, {
+    onSave(m) {
+      const i = state.matches.findIndex((x) => x.id === m.id);
+      if (i >= 0) state.matches[i] = m;
+      else state.matches.push(m);
+      renderMatches();
+      changed();
+      toast(`已儲存場次 ${m.match || ''}`);
+    },
+    onDelete(id) {
+      state.matches = state.matches.filter((x) => x.id !== id);
+      renderMatches();
+      changed();
+    },
+  });
+}
+
+function nextMatchLabel() {
+  const last = state.matches.at(-1)?.match || '';
+  const m = /^(\D*)(\d+)$/.exec(last);
+  return m ? `${m[1]}${Number(m[2]) + 1}` : '';
 }
 
 function renderEffSummary() {
@@ -252,6 +308,10 @@ function onFormInput(e) {
   } else if (t.dataset.list) {
     state[t.dataset.list][Number(t.dataset.i)][t.dataset.k] = t.value;
     changed();
+  } else if (t.dataset.scoring) {
+    scoring[t.dataset.scoring] = t.value;
+    prefs.set('scoring', JSON.stringify(scoring));
+    renderMatches();
   } else if (t.dataset.photo) {
     const p = state.photos.find((x) => x.id === t.dataset.photo);
     if (p) p.caption = t.value;
@@ -274,7 +334,9 @@ function onRadioClick(e) {
 function onFormClick(e) {
   const btn = e.target.closest('button');
   if (!btn) return;
-  if (btn.dataset.remove) {
+  if (btn.dataset.matchEdit) {
+    editMatch(state.matches.find((m) => m.id === btn.dataset.matchEdit), false);
+  } else if (btn.dataset.remove) {
     state[btn.dataset.remove].splice(Number(btn.dataset.i), 1);
     renderLists();
     changed();
@@ -383,7 +445,7 @@ async function onPdf() {
   await store.put(state);
   busy('產生 PDF 中…');
   try {
-    const n = await generatePdf(state, (i, total) => busy(`產生 PDF 中… ${i} / ${total} 頁`));
+    const n = await generatePdf(state, { scoring, onProgress: (i, total) => busy(`產生 PDF 中… ${i} / ${total} 頁`) });
     toast(`PDF 已產生（${n} 頁）`);
   } catch (err) {
     console.error(err);
@@ -400,6 +462,19 @@ function bindEvents() {
   form.addEventListener('click', onFormClick);
   $('#photoInput').addEventListener('change', onPhotos);
   $('#btnStat').addEventListener('click', onFetchStat);
+  $('#btnAddMatch').addEventListener('click', () => {
+    editMatch({ ...blankMatch(state.team.scout), match: nextMatchLabel(), alliance: state.matches.at(-1)?.alliance || '' }, true);
+  });
+  $('#btnApplyMatches').addEventListener('click', () => {
+    const s = matchSummary(state.matches, scoring);
+    if (!s) return toast('尚無逐場紀錄', 'error');
+    Object.assign(state.efficiency, efficiencyFromMatches(s));
+    fillForm();
+    changed();
+    toast(`已依 ${s.n} 場紀錄更新效率欄位`);
+    $('#sec-eff').scrollIntoView({ behavior: 'smooth' });
+  });
+  document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
   $('#btnAddMech').addEventListener('click', () => {
     state.mechanisms.push(blankMech());
     renderLists();
@@ -461,14 +536,57 @@ async function importFromHash() {
   }
   if (!imported) return false;
   history.replaceState(null, '', location.pathname + location.search);
+  await setView('edit');
+  const all = await store.all();
+  const t = imported.team;
+  const existing = t.number && all.find((r) => r.team?.number === t.number && (r.team?.event || '') === (t.event || ''));
+  if (existing && confirm(`已有隊伍 ${t.number}${t.event ? `（${t.event}）` : ''} 的紀錄。\n按「確定」合併逐場紀錄與空白欄位；按「取消」另存新紀錄。`)) {
+    clearTimeout(saveTimer);
+    await store.put(state);
+    state = mergeRecords(normalize(existing), imported);
+    prefs.set('lastRecord', state.id);
+    await changed({ immediate: true });
+    fillForm();
+    toast(`已合併至隊伍 ${t.number} 的紀錄（共 ${state.matches.length} 場）`);
+    return true;
+  }
   await newRecord(imported);
-  toast(`已從 QR Code 匯入隊伍 ${imported.team.number || ''} 的資料`);
+  toast(`已從 QR Code 匯入隊伍 ${t.number || ''} 的資料`);
   return true;
+}
+
+let currentView = 'edit';
+async function setView(v) {
+  if (v === currentView) return;
+  currentView = v;
+  document.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
+  document.querySelectorAll('.edit-only').forEach((el) => (el.hidden = v !== 'edit'));
+  form.hidden = v !== 'edit';
+  $('#pickView').hidden = v !== 'pick';
+  clearTimeout(saveTimer);
+  if (v === 'pick') {
+    await store.put(state);
+    await showPickList();
+  } else {
+    // The pick list may have changed records (ranks, Statbotics), so reload rather than overwrite.
+    await loadRecords();
+    await openRecord(state.id);
+  }
+  window.scrollTo({ top: 0 });
 }
 
 async function init() {
   renderStaticFields();
   bindEvents();
+  initPickList({
+    toast,
+    busy,
+    getScoring: () => scoring,
+    async onOpen(id) {
+      await setView('edit');
+      await openRecord(id);
+    },
+  });
   const all = await loadRecords();
   if (await importFromHash()) return;
   const last = prefs.get('lastRecord');

@@ -1,5 +1,5 @@
 // Network-first service worker so the app keeps working offline at competition venues.
-const CACHE = 'frc-scouting-v1';
+const CACHE = 'frc-scouting-v2';
 const ASSETS = [
   './',
   'index.html',
@@ -10,6 +10,8 @@ const ASSETS = [
   'js/storage.js',
   'js/statbotics.js',
   'js/report.js',
+  'js/matches.js',
+  'js/picklist.js',
   'vendor/jspdf.umd.min.js',
   'vendor/html2canvas.min.js',
   'vendor/qrcode.min.js',

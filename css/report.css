@@ -82,3 +82,6 @@
 .rpt-photo-box { display: flex; align-items: center; justify-content: center; background: #f3f5f9; border-radius: 8px; overflow: hidden; }
 .rpt-photo-box img { display: block; }
 .rpt-photos figcaption { text-align: center; font-weight: 600; margin-top: 4px; }
+
+.rpt-pick-table td, .rpt-pick-table th { padding: 4px 5px; }
+.rpt-pick-table tr.rpt-taken td { color: #98a2b3; text-decoration: line-through; }

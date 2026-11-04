@@ -96,6 +96,7 @@ export function blankRecord() {
     params: [],
     efficiency: { ...fieldsToObj(EFF_FIELDS), ...fieldsToObj(RATING_FIELDS) },
     strategy: { roles: [], startPos: '', pick: '', ...fieldsToObj(STRATEGY_TEXT) },
+    matches: [],
     statbotics: null,
     photos: [],
   };
@@ -111,6 +112,7 @@ export function normalize(data) {
   for (const k of ['team', 'robot', 'efficiency', 'strategy']) rec[k] = { ...base[k], ...(data?.[k] || {}) };
   rec.mechanisms = (Array.isArray(data?.mechanisms) ? data.mechanisms : []).map((m) => ({ ...blankMech(), ...m }));
   rec.params = (Array.isArray(data?.params) ? data.params : []).map((p) => ({ ...blankParam(), ...p }));
+  rec.matches = (Array.isArray(data?.matches) ? data.matches : []).map((m) => ({ ...blankMatch(), ...m }));
   rec.photos = Array.isArray(data?.photos) ? data.photos : [];
   if (!Array.isArray(rec.strategy.roles)) rec.strategy.roles = [];
   rec.id = data?.id || base.id;
@@ -146,3 +148,90 @@ export function estimatedTotal(eff) {
 }
 
 export const pickLabel = (v) => PICK_OPTIONS.find(([k]) => k === v)?.[1] || '';
+
+/* ---------- Match scouting ---------- */
+
+export const MATCH_COUNTERS = {
+  auto: [['autoScored', '得分'], ['autoMissed', '未命中']],
+  teleop: [['teleScored', '得分'], ['teleMissed', '未命中']],
+  other: [['fouls', '犯規']],
+};
+export const ENDGAME_RESULTS = [['none', '未嘗試'], ['fail', '失敗'], ['success', '成功']];
+export const ALLIANCES = [['red', '紅'], ['blue', '藍']];
+
+// Points per action differ every season, so they are a per-device setting rather than hard-coded.
+export const SCORING_FIELDS = [
+  ['leave', '離開起始區'],
+  ['auto', '自動每次得分'],
+  ['teleop', '手動每次得分'],
+  ['endgame', '終局成功'],
+];
+
+export function blankMatch(scout = '') {
+  return {
+    id: newId(), match: '', alliance: '', scout,
+    leave: false, autoScored: 0, autoMissed: 0,
+    teleScored: 0, teleMissed: 0, defense: false, defended: false,
+    endgame: '', fouls: 0, broke: false, notes: '',
+  };
+}
+
+export function matchSummary(matches, scoring = {}) {
+  const n = matches.length;
+  if (!n) return null;
+  const sum = (k) => matches.reduce((a, m) => a + (Number(m[k]) || 0), 0);
+  const count = (fn) => matches.filter(fn).length;
+  const attempts = sum('autoScored') + sum('autoMissed') + sum('teleScored') + sum('teleMissed');
+  const tried = count((m) => m.endgame === 'success' || m.endgame === 'fail');
+  const ok = count((m) => m.endgame === 'success');
+  const pts = Object.fromEntries(SCORING_FIELDS.map(([k]) => [k, num(scoring[k])]));
+  const s = {
+    n,
+    leaveRate: (count((m) => m.leave) / n) * 100,
+    autoScored: sum('autoScored') / n,
+    teleScored: sum('teleScored') / n,
+    cycles: (sum('teleScored') + sum('teleMissed')) / n,
+    accuracy: attempts ? ((sum('autoScored') + sum('teleScored')) / attempts) * 100 : null,
+    endgameRate: tried ? (ok / tried) * 100 : null,
+    fouls: sum('fouls') / n,
+    defenseRate: (count((m) => m.defense) / n) * 100,
+    failures: count((m) => m.broke),
+    autoPoints: pts.auto === null && pts.leave === null ? null
+      : (sum('autoScored') * (pts.auto || 0) + count((m) => m.leave) * (pts.leave || 0)) / n,
+    teleopPoints: pts.teleop === null ? null : (sum('teleScored') * pts.teleop) / n,
+    endgamePoints: pts.endgame === null ? null : (ok * pts.endgame) / n,
+  };
+  s.scoredPerMatch = s.autoScored + s.teleScored;
+  return s;
+}
+
+const round1 = (v) => (v == null ? null : String(Math.round(v * 10) / 10));
+
+// Efficiency fields derived from match records; fields that can't be computed are left out.
+export function efficiencyFromMatches(s) {
+  const patch = {
+    matches: String(s.n),
+    autoPoints: round1(s.autoPoints),
+    teleopPoints: round1(s.teleopPoints),
+    endgamePoints: round1(s.endgamePoints),
+    cycles: round1(s.cycles),
+    accuracy: round1(s.accuracy),
+    endgameRate: round1(s.endgameRate),
+    failures: String(s.failures),
+  };
+  return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== null));
+}
+
+const isEmpty = (v) => v === '' || v == null || (Array.isArray(v) && !v.length);
+
+// Combine a record scouted on another device into an existing one for the same team.
+export function mergeRecords(target, src) {
+  const ids = new Set(target.matches.map((m) => m.id));
+  for (const m of src.matches) if (!ids.has(m.id)) target.matches.push(m);
+  for (const sec of ['team', 'robot', 'efficiency', 'strategy']) {
+    for (const [k, v] of Object.entries(src[sec] || {})) if (isEmpty(target[sec][k]) && !isEmpty(v)) target[sec][k] = v;
+  }
+  if (!target.mechanisms.length) target.mechanisms = src.mechanisms;
+  if (!target.params.length) target.params = src.params;
+  return target;
+}

@@ -17,12 +17,16 @@
       <img src="icon.svg" alt="" width="28" height="28">
       <span>FRC Scouting</span>
     </div>
-    <div class="records">
+    <div class="viewtabs" role="tablist">
+      <button type="button" role="tab" data-view="edit" class="active">紀錄</button>
+      <button type="button" role="tab" data-view="pick">選隊清單</button>
+    </div>
+    <div class="records edit-only">
       <select id="recordSelect" aria-label="已儲存的紀錄"></select>
       <button type="button" id="btnNew">＋ 新增</button>
       <button type="button" id="btnDelete" class="ghost danger">刪除</button>
     </div>
-    <div class="actions">
+    <div class="actions edit-only">
       <button type="button" id="btnImport" class="ghost">匯入 JSON</button>
       <button type="button" id="btnExport" class="ghost">匯出 JSON</button>
       <button type="button" id="btnExportAll" class="ghost">匯出全部</button>
@@ -30,11 +34,12 @@
     </div>
   </header>
 
-  <nav class="sectionnav" aria-label="區段">
+  <nav class="sectionnav edit-only" aria-label="區段">
     <a href="#sec-team">隊伍</a>
     <a href="#sec-stat">Statbotics</a>
     <a href="#sec-photo">照片</a>
     <a href="#sec-robot">機構參數</a>
+    <a href="#sec-match">逐場</a>
     <a href="#sec-eff">效率</a>
     <a href="#sec-strat">策略</a>
     <a href="#sec-qr">QR Code</a>
@@ -101,8 +106,23 @@
       <button type="button" id="btnAddParam" class="ghost">＋ 新增參數</button>
     </section>
 
+    <section id="sec-match" class="card">
+      <h2><span class="num">5</span>逐場紀錄</h2>
+      <div class="photo-controls">
+        <button type="button" id="btnAddMatch" class="primary">＋ 新增場次</button>
+        <button type="button" id="btnApplyMatches" class="ghost">套用到效率欄位</button>
+      </div>
+      <div id="matchSummary" class="tiles"></div>
+      <div id="matchList" class="table-wrap"></div>
+      <details id="scoringSettings">
+        <summary>計分設定（每台裝置各自設定）</summary>
+        <p class="muted">每年遊戲的分數不同。填入每次動作的分數後，逐場紀錄會換算成平均得分；留空則只計次數。</p>
+        <div class="grid" id="scoringFields"></div>
+      </details>
+    </section>
+
     <section id="sec-eff" class="card">
-      <h2><span class="num">5</span>效率</h2>
+      <h2><span class="num">6</span>效率</h2>
       <div class="grid" id="effFields"></div>
       <div id="effSummary" class="eff-summary"></div>
       <h3>評分（1–5）</h3>
@@ -110,13 +130,13 @@
     </section>
 
     <section id="sec-strat" class="card">
-      <h2><span class="num">6</span>策略</h2>
+      <h2><span class="num">7</span>策略</h2>
       <div class="grid" id="stratTop"></div>
       <div class="grid" id="stratFields"></div>
     </section>
 
     <section id="sec-qr" class="card">
-      <h2><span class="num">7</span>QR Code</h2>
+      <h2><span class="num">8</span>QR Code</h2>
       <div class="qr-wrap">
         <img id="qrImg" alt="QR Code" width="220" height="220">
         <div>
@@ -129,6 +149,26 @@
       </div>
     </section>
   </main>
+
+  <main id="pickView" hidden>
+    <section class="card">
+      <h2>選隊清單</h2>
+      <div class="pick-controls">
+        <label class="field compact"><span>賽事</span><select id="pickEvent"></select></label>
+        <label class="field compact"><span>排序</span><select id="pickSort"></select></label>
+        <label class="toggle small"><input type="checkbox" id="pickHideTaken"><b>隱藏已選走</b></label>
+        <button type="button" id="pickApplySort" class="ghost" hidden>設為我的排序</button>
+        <span class="spacer"></span>
+        <button type="button" id="pickRefresh" class="ghost">更新全部 Statbotics</button>
+        <button type="button" id="pickPdf" class="primary">匯出選隊 PDF</button>
+      </div>
+      <p id="pickCount" class="muted"></p>
+      <div id="pickTable" class="table-wrap"></div>
+      <p class="muted">「我的排序」可用 ↑↓ 調整；選隊時按「選走」標記已被其他聯盟選走的隊伍。點隊名開啟該筆紀錄。</p>
+    </section>
+  </main>
+
+  <dialog id="matchDialog"><div id="matchForm"></div></dialog>
 
   <footer class="foot muted">
     資料儲存在此瀏覽器（IndexedDB）。數據來源：<a href="https://www.statbotics.io" target="_blank" rel="noopener">Statbotics</a>
