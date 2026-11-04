@@ -1,0 +1,10 @@
+{
+  "name": "FRC Scouting",
+  "short_name": "Scouting",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f5f9",
+  "theme_color": "#1d4ed8",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
