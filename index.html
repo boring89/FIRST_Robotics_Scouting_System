@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRC Scouting</title>
+  <meta name="description" content="FRC 機器人偵察紀錄：隊伍資訊、機構照片、機構參數與效率、策略，整合 Statbotics，輸出 PDF 與 QR Code。">
+  <meta name="theme-color" content="#1d4ed8">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/report.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="28" height="28">
+      <span>FRC Scouting</span>
+    </div>
+    <div class="records">
+      <select id="recordSelect" aria-label="已儲存的紀錄"></select>
+      <button type="button" id="btnNew">＋ 新增</button>
+      <button type="button" id="btnDelete" class="ghost danger">刪除</button>
+    </div>
+    <div class="actions">
+      <button type="button" id="btnImport" class="ghost">匯入 JSON</button>
+      <button type="button" id="btnExport" class="ghost">匯出 JSON</button>
+      <button type="button" id="btnExportAll" class="ghost">匯出全部</button>
+      <button type="button" id="btnPdf" class="primary">產生 PDF</button>
+    </div>
+  </header>
+
+  <nav class="sectionnav" aria-label="區段">
+    <a href="#sec-team">隊伍</a>
+    <a href="#sec-stat">Statbotics</a>
+    <a href="#sec-photo">照片</a>
+    <a href="#sec-robot">機構參數</a>
+    <a href="#sec-eff">效率</a>
+    <a href="#sec-strat">策略</a>
+    <a href="#sec-qr">QR Code</a>
+  </nav>
+
+  <main id="form">
+    <section id="sec-team" class="card">
+      <h2><span class="num">1</span>隊伍資訊</h2>
+      <div class="grid" id="teamFields"></div>
+    </section>
+
+    <section id="sec-stat" class="card">
+      <h2><span class="num">2</span>Statbotics 數據</h2>
+      <div class="stat-controls">
+        <label class="field compact"><span>賽季</span><input id="statYear" type="number" inputmode="numeric" min="2002" max="2100"></label>
+        <button type="button" id="btnStat" class="primary">抓取 Statbotics</button>
+        <span id="statStatus" class="muted"></span>
+      </div>
+      <div id="statView"></div>
+    </section>
+
+    <section id="sec-photo" class="card">
+      <h2><span class="num">3</span>機構照片</h2>
+      <div class="photo-controls">
+        <label class="button primary">
+          ＋ 加入照片
+          <input id="photoInput" type="file" accept="image/*" multiple hidden>
+        </label>
+        <span class="muted">手機可直接拍照；照片會自動壓縮並存在此裝置。</span>
+      </div>
+      <div id="photoGrid" class="photo-grid"></div>
+      <datalist id="photoCaptions">
+        <option value="整車"></option>
+        <option value="底盤"></option>
+        <option value="Intake"></option>
+        <option value="Shooter"></option>
+        <option value="Elevator / Arm"></option>
+        <option value="Climber"></option>
+        <option value="電控"></option>
+      </datalist>
+    </section>
+
+    <section id="sec-robot" class="card">
+      <h2><span class="num">4</span>機構參數</h2>
+      <div class="grid" id="robotFields"></div>
+
+      <h3>機構與效率</h3>
+      <p class="muted">每個機構的類型、馬達、週期時間與成功率。</p>
+      <div id="mechList" class="rows"></div>
+      <button type="button" id="btnAddMech" class="ghost">＋ 新增機構</button>
+      <datalist id="mechNames">
+        <option value="Intake"></option>
+        <option value="Indexer"></option>
+        <option value="Shooter"></option>
+        <option value="Elevator"></option>
+        <option value="Arm"></option>
+        <option value="Wrist"></option>
+        <option value="Climber"></option>
+      </datalist>
+
+      <h3>自訂參數</h3>
+      <p class="muted">每年遊戲不同，可自行加入項目（例：Shooter 轉速、可得分層級）。</p>
+      <div id="paramList" class="rows"></div>
+      <button type="button" id="btnAddParam" class="ghost">＋ 新增參數</button>
+    </section>
+
+    <section id="sec-eff" class="card">
+      <h2><span class="num">5</span>效率</h2>
+      <div class="grid" id="effFields"></div>
+      <div id="effSummary" class="eff-summary"></div>
+      <h3>評分（1–5）</h3>
+      <div class="ratings" id="ratingFields"></div>
+    </section>
+
+    <section id="sec-strat" class="card">
+      <h2><span class="num">6</span>策略</h2>
+      <div class="grid" id="stratTop"></div>
+      <div class="grid" id="stratFields"></div>
+    </section>
+
+    <section id="sec-qr" class="card">
+      <h2><span class="num">7</span>QR Code</h2>
+      <div class="qr-wrap">
+        <img id="qrImg" alt="QR Code" width="220" height="220">
+        <div>
+          <p>QR Code 內含此筆紀錄的文字資料（不含照片）。掃描後會開啟本網站並自動匯入，Statbotics 數據可再重新抓取。</p>
+          <p id="qrInfo" class="muted"></p>
+          <div class="row-actions">
+            <button type="button" id="btnCopyLink" class="ghost">複製連結</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot muted">
+    資料儲存在此瀏覽器（IndexedDB）。數據來源：<a href="https://www.statbotics.io" target="_blank" rel="noopener">Statbotics</a>
+  </footer>
+
+  <input type="file" id="importFile" accept="application/json,.json" hidden>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="busy" hidden><div class="busy-box"><div class="spinner"></div><span id="busyText">產生 PDF 中…</span></div></div>
+  <div id="reportRoot" aria-hidden="true"></div>
+
+  <script src="vendor/jspdf.umd.min.js"></script>
+  <script src="vendor/html2canvas.min.js"></script>
+  <script src="vendor/qrcode.min.js"></script>
+  <script src="vendor/lz-string.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
